@@ -4,7 +4,7 @@ A complete demo project showcasing **JTS Profile C (JTS-C)** authentication with
 
 ## What is JTS?
 
-**JTS (JSON Token Standard)** is a modern authentication protocol designed for secure, stateful session management. Profile C (JTS-C) provides:
+**JTS (Janus Token System)** is a modern authentication protocol designed for secure, stateful session management. Profile C (JTS-C) provides:
 
 - 🔐 **BearerPass** - Short-lived access tokens (signed JWT)
 - 🔄 **StateProof** - Secure refresh tokens for session renewal
