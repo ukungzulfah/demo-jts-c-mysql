@@ -252,9 +252,11 @@ ISC
 
 ## 🔗 Related Projects
 
-- [jts-core](https://github.com/engjts/jts-core) - JTS Core Library
-- [engjts-mysql-adapter](https://github.com/engjts/engjts-mysql-adapter) - MySQL Adapter
-- [demo-jts-s](https://github.com/ukungzulfah/demo-jts-s) - JTS-S Demo (Standard Profile)
+- [@engjts/auth](https://www.npmjs.com/package/@engjts/auth) - NPM Janus Token System (JTS)
+- [@engjts/mysql-adapter](https://www.npmjs.com/package/@engjts/mysql-adapter) - NPM MySQL session store adapter
+- [jts-core](https://github.com/ukungzulfah/jts-core) - JTS Core Library
+- [engjts-mysql-adapter](https://github.com/ukungzulfah/engjts-mysql-adapter) - MySQL Adapter
+- [demo-jts-s](https://github.com/ukungzulfah/jts-express-example) - JTS-S Demo (Standard Profile)
 
 ---
 
