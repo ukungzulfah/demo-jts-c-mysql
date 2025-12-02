@@ -234,7 +234,7 @@ npm test
 
 ## 📚 JTS Specification
 
-This implementation follows the [JTS Specification v1](https://github.com/engjts/jts-spec), including:
+This implementation follows the [JTS Specification v1](https://github.com/ukungzulfah/jts-core/blob/main/JTS_Specification_v1-en.md), including:
 
 - Section 4.3: Cookie Requirements and CSRF Protection
 - Section 4.4: StateProof Rotation
