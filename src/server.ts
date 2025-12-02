@@ -1,15 +1,37 @@
 /**
- * Demo: JTS Auth Server dengan MySQL Adapter
- * Simple Express server untuk test authentication flow
+ * Demo: JTS-C Auth Server dengan MySQL Adapter
+ * Implementasi JTS-C (Confidentiality) profile dengan enkripsi JWE
+ *
+ * JTS-C Features:
+ * - Signed-then-Encrypted tokens (JWS wrapped in JWE)
+ * - HttpOnly cookie untuk StateProof
+ * - CSRF protection
+ * - StateProof rotation
  */
 
 import express, { Request, Response } from 'express';
+import cookieParser from 'cookie-parser';
 import mysql from 'mysql2/promise';
-import { JTSAuthServer, generateKeyPair } from '@engjts/auth';
+import {
+  JTSAuthServer,
+  JTSResourceServer,
+  generateKeyPair,
+  generateRSAKeyPair,
+  JTS_PROFILES,
+  JTSAlgorithm,
+  mountJTSRoutes,
+  jtsAuth,
+  jtsRequirePermissions,
+  type LoginOptions,
+  type StateProofCookieOptions,
+} from '@engjts/auth';
 import { MySQLSessionStore } from '@engjts/mysql-adapter';
 
 const app = express();
 app.use(express.json());
+app.use(cookieParser());
+
+// ============== CONFIGURATION ==============
 
 // Simulated user database
 const users: Record<string, { id: string; email: string; password: string; name: string }> = {
@@ -21,7 +43,17 @@ const users: Record<string, { id: string; email: string; password: string; name:
   },
 };
 
+// Cookie options sesuai JTS Spec Section 4.3
+const cookieOptions: StateProofCookieOptions = {
+  name: 'jts_state_proof',
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'strict',
+  path: '/jts',
+  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 hari
+};
+
 let authServer: JTSAuthServer;
+let resourceServer: JTSResourceServer;
 let sessionStore: MySQLSessionStore;
 
 async function initAuth() {
@@ -39,219 +71,213 @@ async function initAuth() {
   await sessionStore.initialize();
 
   // Generate signing key pair (ES256 - ECDSA dengan P-256)
-  const signingKey = await generateKeyPair('demo-key-001', 'ES256');
+  const signingKey = await generateKeyPair('auth-server-key-2025-001', JTSAlgorithm.ES256);
 
-  // Create JTS Auth Server
+  // Generate encryption key pair untuk JTS-C (RSA untuk JWE)
+  const encryptionKey = await generateRSAKeyPair('resource-server-key-2025-001');
+
+  // Create JTS Auth Server dengan profile JTS-C
   authServer = new JTSAuthServer({
-    profile: 'JTS-S/v1',
+    profile: JTS_PROFILES.CONFIDENTIAL, // 'JTS-C/v1'
     signingKey,
     sessionStore,
+    // JTS-C specific: encryption key untuk JWE
+    encryptionKey,
+    bearerPassLifetime: 300, // 5 menit
+    stateProofLifetime: 604800, // 7 hari
+    gracePeriod: 30, // 30 detik grace period
+    rotationGraceWindow: 10, // 10 detik grace window
+    issuer: 'http://localhost:3000',
+    audience: 'http://localhost:3000/api',
   });
 
-  console.log('✅ JTS Auth Server initialized with MySQL adapter');
+  // Create Resource Server untuk verify encrypted tokens
+  resourceServer = new JTSResourceServer({
+    acceptedProfiles: [JTS_PROFILES.CONFIDENTIAL],
+    // For signature verification - use Auth Server's public key
+    publicKeys: [
+      {
+        kid: signingKey.kid,
+        publicKey: signingKey.publicKey,
+        algorithm: JTSAlgorithm.ES256,
+      },
+    ],
+    // For JWE decryption - use Resource Server's private key
+    decryptionKey: {
+      kid: encryptionKey.kid,
+      privateKey: encryptionKey.privateKey!,
+    },
+    audience: 'http://localhost:3000/api',
+    gracePeriodTolerance: 30, // 30 detik grace period untuk in-flight requests
+  });
+
+  console.log('✅ JTS-C Auth Server initialized with MySQL adapter');
+  console.log('   Profile: JTS-C/v1 (Confidentiality)');
+  console.log('   Signing Algorithm: ES256');
+  console.log('   Encryption: RSA-OAEP + A256GCM');
+
+  // Setup routes after initialization
+  setupRoutes();
 }
 
-// ============== ROUTES ==============
-
-// Health check
-app.get('/health', async (_req: Request, res: Response) => {
-  const dbHealthy = await sessionStore.healthCheck();
-  res.json({ 
-    status: 'ok', 
-    database: dbHealthy ? 'connected' : 'disconnected',
-    timestamp: new Date().toISOString(),
+function setupRoutes() {
+  // Health check
+  app.get('/health', async (_req: Request, res: Response) => {
+    const dbHealthy = await sessionStore.healthCheck();
+    res.json({
+      status: 'ok',
+      profile: 'JTS-C/v1',
+      database: dbHealthy ? 'connected' : 'disconnected',
+      timestamp: new Date().toISOString(),
+    });
   });
-});
 
-// Login
-app.post('/auth/login', async (req: Request, res: Response) => {
-  try {
-    const { email, password } = req.body;
+  // Mount JTS routes menggunakan helper dari @engjts/auth
+  // Ini akan otomatis membuat:
+  // - POST /jts/login
+  // - POST /jts/renew
+  // - POST /jts/logout
+  // - GET /jts/sessions
+  // - DELETE /jts/sessions/:aid
+  // - GET /.well-known/jts-jwks
+  // - GET /.well-known/jts-configuration
+  mountJTSRoutes(app, {
+    authServer,
+    resourceServer,
+    cookieOptions,
+    basePath: '/jts',
 
-    // Validate user
-    const user = users[email];
-    if (!user || user.password !== password) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
+    // Credential validation function
+    validateCredentials: async (req: Request): Promise<LoginOptions | null> => {
+      const { email, password } = req.body;
 
-    // Create JTS session using login()
-    const result = await authServer.login({
-      prn: `user:${user.id}`,
-      deviceFingerprint: req.headers['user-agent'] || 'unknown',
-      userAgent: req.headers['user-agent'] as string,
-      ipAddress: req.ip || '127.0.0.1',
-      metadata: { email: user.email, name: user.name },
-    });
+      const user = users[email];
+      if (!user || user.password !== password) {
+        return null; // Invalid credentials
+      }
 
-    console.log(`✅ Login successful: ${user.email}`);
+      // Return LoginOptions untuk user yang valid
+      return {
+        prn: `user:${user.id}`,
+        deviceFingerprint: req.headers['user-agent'] || 'unknown',
+        userAgent: req.headers['user-agent'] as string,
+        ipAddress: req.ip || '127.0.0.1',
+        metadata: { email: user.email, name: user.name },
+        // Extended claims untuk JTS-C
+        audience: 'http://localhost:3000/api',
+        permissions: ['read:profile', 'write:posts'],
+        authMethod: 'pwd',
+      };
+    },
 
+    // CSRF validation - check X-JTS-Request header atau Origin
+    validateCSRF: (req: Request): boolean => {
+      const jtsHeader = req.headers['x-jts-request'];
+      if (jtsHeader === '1') return true;
+
+      const origin = req.headers.origin || req.headers.referer;
+      const allowedOrigins = ['http://localhost:3000', 'http://localhost:5173'];
+
+      return !!origin && allowedOrigins.some((allowed) => origin.startsWith(allowed));
+    },
+  });
+
+  // ============== PROTECTED API ROUTES ==============
+
+  // Protected route example - requires authentication
+  app.get('/api/profile', jtsAuth({ resourceServer }), (req: Request, res: Response) => {
+    // req.jts contains verified payload
     res.json({
-      message: 'Login successful',
-      user: { id: user.id, email: user.email, name: user.name },
-      bearerPass: result.bearerPass,
-      stateProof: result.stateProof,
-      expiresAt: new Date(result.expiresAt * 1000).toISOString(),
-      sessionId: result.sessionId,
+      message: 'Protected resource accessed successfully',
+      user: {
+        prn: req.jts?.payload.prn,
+        permissions: req.jts?.payload.perm,
+      },
+      tokenType: 'JTS-C/v1 (encrypted)',
     });
-  } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({ error: 'Login failed', details: String(error) });
-  }
-});
+  });
 
-// Verify BearerPass (protected route example)
-app.get('/auth/me', async (req: Request, res: Response) => {
-  try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
-      return res.status(401).json({ error: 'No token provided' });
+  // Protected route with specific permissions
+  app.get(
+    '/api/posts',
+    jtsAuth({ resourceServer }),
+    jtsRequirePermissions({ required: ['read:profile'] }),
+    (req: Request, res: Response) => {
+      res.json({
+        message: 'Posts retrieved successfully',
+        user: req.jts?.payload.prn,
+        posts: [
+          { id: 1, title: 'First Post' },
+          { id: 2, title: 'Second Post' },
+        ],
+      });
     }
+  );
 
-    const token = authHeader.substring(7);
-    const result = authServer.verifyBearerPass(token);
-
-    if (!result.valid) {
-      return res.status(401).json({ error: result.error || 'Invalid token' });
+  // Route requiring write permission
+  app.post(
+    '/api/posts',
+    jtsAuth({ resourceServer }),
+    jtsRequirePermissions({ required: ['write:posts'] }),
+    (req: Request, res: Response) => {
+      res.json({
+        message: 'Post created successfully',
+        user: req.jts?.payload.prn,
+        post: { id: 3, ...req.body },
+      });
     }
-
-    res.json({
-      valid: true,
-      payload: result.payload,
-    });
-  } catch (error) {
-    console.error('Verify error:', error);
-    res.status(500).json({ error: 'Verification failed' });
-  }
-});
-
-// Renew token using StateProof
-app.post('/auth/renew', async (req: Request, res: Response) => {
-  try {
-    const { stateProof } = req.body;
-    if (!stateProof) {
-      return res.status(400).json({ error: 'stateProof required' });
-    }
-
-    const result = await authServer.renew({ stateProof });
-
-    console.log(`🔄 Token renewed`);
-
-    res.json({
-      message: 'Token renewed',
-      bearerPass: result.bearerPass,
-      stateProof: result.stateProof,
-      expiresAt: new Date(result.expiresAt * 1000).toISOString(),
-    });
-  } catch (error) {
-    console.error('Renew error:', error);
-    res.status(500).json({ error: 'Renewal failed', details: String(error) });
-  }
-});
-
-// Logout using StateProof
-app.post('/auth/logout', async (req: Request, res: Response) => {
-  try {
-    const { stateProof } = req.body;
-    if (!stateProof) {
-      return res.status(400).json({ error: 'stateProof required' });
-    }
-
-    const success = await authServer.logout(stateProof);
-
-    console.log('👋 Logout successful');
-
-    res.json({ message: 'Logged out successfully', success });
-  } catch (error) {
-    console.error('Logout error:', error);
-    res.status(500).json({ error: 'Logout failed' });
-  }
-});
-
-// Get all sessions for user (using StateProof to identify user)
-app.post('/auth/sessions', async (req: Request, res: Response) => {
-  try {
-    const { stateProof } = req.body;
-    if (!stateProof) {
-      return res.status(400).json({ error: 'stateProof required' });
-    }
-
-    // Validate stateProof first
-    const validation = await sessionStore.getSessionByStateProof(stateProof);
-    if (!validation.valid || !validation.session) {
-      return res.status(401).json({ error: 'Invalid stateProof' });
-    }
-
-    const sessions = await sessionStore.getSessionsForPrincipal(validation.session.prn);
-
-    res.json({
-      count: sessions.length,
-      sessions: sessions.map((s) => ({
-        aid: s.aid,
-        deviceFingerprint: s.deviceFingerprint,
-        createdAt: s.createdAt,
-        lastActive: s.lastActive,
-        isCurrent: s.aid === validation.session!.aid,
-      })),
-    });
-  } catch (error) {
-    console.error('Get sessions error:', error);
-    res.status(500).json({ error: 'Failed to get sessions' });
-  }
-});
-
-// Logout all sessions
-app.post('/auth/logout-all', async (req: Request, res: Response) => {
-  try {
-    const { stateProof } = req.body;
-    if (!stateProof) {
-      return res.status(400).json({ error: 'stateProof required' });
-    }
-
-    const validation = await sessionStore.getSessionByStateProof(stateProof);
-    if (!validation.valid || !validation.session) {
-      return res.status(401).json({ error: 'Invalid stateProof' });
-    }
-
-    const count = await sessionStore.deleteAllSessionsForPrincipal(validation.session.prn);
-
-    console.log(`🗑️ Logged out all sessions: ${count} deleted`);
-
-    res.json({ 
-      message: 'All sessions logged out',
-      deletedCount: count,
-    });
-  } catch (error) {
-    console.error('Logout all error:', error);
-    res.status(500).json({ error: 'Logout all failed' });
-  }
-});
+  );
+}
 
 // ============== START SERVER ==============
 
 const PORT = 3000;
 
-initAuth().then(() => {
-  app.listen(PORT, () => {
-    console.log(`
-╔════════════════════════════════════════════════════════════╗
-║           🚀 JTS Demo Server with MySQL Adapter            ║
-╠════════════════════════════════════════════════════════════╣
-║  Server running at: http://localhost:${PORT}                  ║
-╠════════════════════════════════════════════════════════════╣
-║  Endpoints:                                                ║
-║    GET  /health          - Health check                    ║
-║    POST /auth/login      - Login {email, password}         ║
-║    GET  /auth/me         - Verify (Bearer token header)    ║
-║    POST /auth/renew      - Renew {stateProof}              ║
-║    POST /auth/logout     - Logout {stateProof}             ║
-║    POST /auth/sessions   - List sessions {stateProof}      ║
-║    POST /auth/logout-all - Logout all {stateProof}         ║
-╠════════════════════════════════════════════════════════════╣
-║  Test user: user@demo.com / password123                    ║
-╚════════════════════════════════════════════════════════════╝
+initAuth()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`
+╔════════════════════════════════════════════════════════════════╗
+║        🔐 JTS-C Demo Server (Confidentiality Profile)          ║
+╠════════════════════════════════════════════════════════════════╣
+║  Server running at: http://localhost:${PORT}                      ║
+║  Profile: JTS-C/v1 (Signed-then-Encrypted)                     ║
+╠════════════════════════════════════════════════════════════════╣
+║  Discovery Endpoints:                                          ║
+║    GET  /.well-known/jts-configuration                         ║
+║    GET  /.well-known/jts-jwks                                  ║
+╠════════════════════════════════════════════════════════════════╣
+║  Auth Endpoints (auto-mounted via mountJTSRoutes):             ║
+║    POST   /jts/login         - Login {email, password}         ║
+║    POST   /jts/renew         - Renew (StateProof in cookie)    ║
+║    POST   /jts/logout        - Logout (StateProof in cookie)   ║
+║    GET    /jts/sessions      - List sessions (Bearer token)    ║
+║    DELETE /jts/sessions/:aid - Revoke session                  ║
+╠════════════════════════════════════════════════════════════════╣
+║  Protected API Endpoints:                                      ║
+║    GET  /api/profile   - Requires authentication               ║
+║    GET  /api/posts     - Requires read:profile permission      ║
+║    POST /api/posts     - Requires write:posts permission       ║
+╠════════════════════════════════════════════════════════════════╣
+║  Security Features:                                            ║
+║    ✅ JWE Encryption (signed-then-encrypted)                   ║
+║    ✅ HttpOnly Cookie for StateProof                           ║
+║    ✅ CSRF Protection (Origin + X-JTS-Request header)          ║
+║    ✅ StateProof Rotation on /renew                            ║
+║    ✅ Replay Attack Detection                                  ║
+║    ✅ Permission-based Access Control                          ║
+║    ✅ Standard JTS Error Codes                                 ║
+╠════════════════════════════════════════════════════════════════╣
+║  Test:                                                         ║
+║    Email: user@demo.com | Password: password123                ║
+║                                                                ║
+║  Note: For /jts/renew and /jts/logout, include header:         ║
+║    X-JTS-Request: 1                                            ║
+╚════════════════════════════════════════════════════════════════╝
     `);
+    });
+  })
+  .catch((err) => {
+    console.error('Failed to start server:', err);
+    process.exit(1);
   });
-}).catch((err) => {
-  console.error('Failed to start server:', err);
-  process.exit(1);
-});
