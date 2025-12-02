@@ -501,3 +501,15 @@ SELECT COUNT(*) as remaining_sessions FROM jts_sessions;
 | JTS-403-02 | permission_denied | 403 | Missing required permissions |
 
 ---
+
+## 🔗 Links
+
+### Core
+- [npm Package](https://www.npmjs.com/package/@engjts/auth)
+- [GitHub Repository](https://github.com/ukungzulfah/jts-core.git)
+- [Issue Tracker](https://github.com/ukungzulfah/jts-core/issues)
+- [Changelog](./CHANGELOG.md)
+
+### Related Projects
+- [@engjts/mysql-adapter](https://github.com/ukungzulfah/engjts-mysql-adapter) - MySQL session store adapter for JTS
+- [JTS Express Server Example](https://github.com/ukungzulfah/jts-express-example) - Production-ready Express.js integration example
