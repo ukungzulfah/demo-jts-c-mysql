@@ -250,13 +250,19 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ISC
 
-## 🔗 Related Projects
+## 🔗 Links
 
-- [@engjts/auth](https://www.npmjs.com/package/@engjts/auth) - NPM Janus Token System (JTS)
-- [@engjts/mysql-adapter](https://www.npmjs.com/package/@engjts/mysql-adapter) - NPM MySQL session store adapter
-- [jts-core](https://github.com/ukungzulfah/jts-core) - JTS Core Library
-- [engjts-mysql-adapter](https://github.com/ukungzulfah/engjts-mysql-adapter) - MySQL Adapter
-- [demo-jts-s](https://github.com/ukungzulfah/jts-express-example) - JTS-S Demo (Standard Profile)
+### Core
+- [npm Package](https://www.npmjs.com/package/@engjts/auth)
+- [GitHub Repository](https://github.com/ukungzulfah/jts-core.git)
+- [Issue Tracker](https://github.com/ukungzulfah/jts-core/issues)
+- [Changelog](./CHANGELOG.md)
+
+### Related Projects
+- [@engjts/mysql-adapter](https://github.com/ukungzulfah/engjts-mysql-adapter) - MySQL session store adapter for JTS
+- [JTS-C Demo with MySQL](https://github.com/ukungzulfah/demo-jts-c-mysql) - Complete JTS-C implementation example with MySQL
+- [Test Report (JTS-C)](https://github.com/ukungzulfah/demo-jts-c-mysql/blob/main/TEST_REPORT.md) - Comprehensive test coverage report
+- [JTS Express Server Example](https://github.com/ukungzulfah/jts-express-example) - Production-ready Express.js integration example
 
 ---
 
