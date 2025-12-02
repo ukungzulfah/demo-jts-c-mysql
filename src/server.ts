@@ -1,10 +1,10 @@
 /**
- * Demo: JTS-C Auth Server dengan MySQL Adapter
- * Implementasi JTS-C (Confidentiality) profile dengan enkripsi JWE
+ * Demo: JTS-C Auth Server with MySQL Adapter
+ * JTS-C (Confidentiality) profile implementation with JWE encryption
  *
  * JTS-C Features:
  * - Signed-then-Encrypted tokens (JWS wrapped in JWE)
- * - HttpOnly cookie untuk StateProof
+ * - HttpOnly cookie for StateProof
  * - CSRF protection
  * - StateProof rotation
  */
@@ -31,7 +31,7 @@ const app = express();
 app.use(express.json());
 app.use(cookieParser());
 
-// ============== CONFIGURATION ==============
+// ============== CONFIGURATION ============== 
 
 // Simulated user database
 const users: Record<string, { id: string; email: string; password: string; name: string }> = {
@@ -43,13 +43,13 @@ const users: Record<string, { id: string; email: string; password: string; name:
   },
 };
 
-// Cookie options sesuai JTS Spec Section 4.3
+// Cookie options according to JTS Spec Section 4.3
 const cookieOptions: StateProofCookieOptions = {
   name: 'jts_state_proof',
   secure: process.env.NODE_ENV === 'production',
   sameSite: 'strict',
   path: '/jts',
-  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 hari
+  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
 };
 
 let authServer: JTSAuthServer;
@@ -70,28 +70,28 @@ async function initAuth() {
   sessionStore = new MySQLSessionStore({ pool });
   await sessionStore.initialize();
 
-  // Generate signing key pair (ES256 - ECDSA dengan P-256)
+  // Generate signing key pair (ES256 - ECDSA with P-256)
   const signingKey = await generateKeyPair('auth-server-key-2025-001', JTSAlgorithm.ES256);
 
-  // Generate encryption key pair untuk JTS-C (RSA untuk JWE)
+  // Generate encryption key pair for JTS-C (RSA for JWE)
   const encryptionKey = await generateRSAKeyPair('resource-server-key-2025-001');
 
-  // Create JTS Auth Server dengan profile JTS-C
+  // Create JTS Auth Server with JTS-C profile
   authServer = new JTSAuthServer({
     profile: JTS_PROFILES.CONFIDENTIAL, // 'JTS-C/v1'
     signingKey,
     sessionStore,
-    // JTS-C specific: encryption key untuk JWE
+    // JTS-C specific: encryption key for JWE
     encryptionKey,
-    bearerPassLifetime: 300, // 5 menit
-    stateProofLifetime: 604800, // 7 hari
-    gracePeriod: 30, // 30 detik grace period
-    rotationGraceWindow: 10, // 10 detik grace window
+    bearerPassLifetime: 300, // 5 minutes
+    stateProofLifetime: 604800, // 7 days
+    gracePeriod: 30, // 30 seconds grace period
+    rotationGraceWindow: 10, // 10 seconds grace window
     issuer: 'http://localhost:3000',
     audience: 'http://localhost:3000/api',
   });
 
-  // Create Resource Server untuk verify encrypted tokens
+  // Create Resource Server to verify encrypted tokens
   resourceServer = new JTSResourceServer({
     acceptedProfiles: [JTS_PROFILES.CONFIDENTIAL],
     // For signature verification - use Auth Server's public key
@@ -108,7 +108,7 @@ async function initAuth() {
       privateKey: encryptionKey.privateKey!,
     },
     audience: 'http://localhost:3000/api',
-    gracePeriodTolerance: 30, // 30 detik grace period untuk in-flight requests
+    gracePeriodTolerance: 30, // 30 seconds grace period for in-flight requests
   });
 
   console.log('✅ JTS-C Auth Server initialized with MySQL adapter');
@@ -132,8 +132,8 @@ function setupRoutes() {
     });
   });
 
-  // Mount JTS routes menggunakan helper dari @engjts/auth
-  // Ini akan otomatis membuat:
+  // Mount JTS routes using helper from @engjts/auth
+  // This will automatically create:
   // - POST /jts/login
   // - POST /jts/renew
   // - POST /jts/logout
@@ -156,21 +156,21 @@ function setupRoutes() {
         return null; // Invalid credentials
       }
 
-      // Return LoginOptions untuk user yang valid
+      // Return LoginOptions for valid user
       return {
         prn: `user:${user.id}`,
         deviceFingerprint: req.headers['user-agent'] || 'unknown',
         userAgent: req.headers['user-agent'] as string,
         ipAddress: req.ip || '127.0.0.1',
         metadata: { email: user.email, name: user.name },
-        // Extended claims untuk JTS-C
+        // Extended claims for JTS-C
         audience: 'http://localhost:3000/api',
         permissions: ['read:profile', 'write:posts'],
         authMethod: 'pwd',
       };
     },
 
-    // CSRF validation - check X-JTS-Request header atau Origin
+    // CSRF validation - check X-JTS-Request header or Origin
     validateCSRF: (req: Request): boolean => {
       const jtsHeader = req.headers['x-jts-request'];
       if (jtsHeader === '1') return true;
@@ -182,7 +182,7 @@ function setupRoutes() {
     },
   });
 
-  // ============== PROTECTED API ROUTES ==============
+  // ============== PROTECTED API ROUTES ============== 
 
   // Protected route example - requires authentication
   app.get('/api/profile', jtsAuth({ resourceServer }), (req: Request, res: Response) => {
@@ -229,7 +229,7 @@ function setupRoutes() {
   );
 }
 
-// ============== START SERVER ==============
+// ============== START SERVER ============== 
 
 const PORT = 3000;
 
